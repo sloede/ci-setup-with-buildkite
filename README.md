@@ -6,7 +6,7 @@ This project aims to curate and present information on how to set up a
 continuous integration (CI) infrastructure with self-hosted runners for an open
 source project on GitHub. That is, instead of using only the GitHub-hosted
 runners for testing, documentation building etc., we want to run additional CI
-jobs on hardware what we control, either on cloud servers or on on-premise
+jobs on hardware that we control, either on cloud servers or on on-premise
 machines. The focus of this effort is the open source research software
 [Trixi.jl](https://github.com/trixi-framework/Trixi.jl).
 
