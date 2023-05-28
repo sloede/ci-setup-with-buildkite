@@ -338,12 +338,18 @@ or for all runners with
 journalctl -f -u "ephemeral-github-actions-runner@*" --no-hostname --no-tail
 ```
 
-### Verification of runner registration
+### Verify registration and update runner usage permissions
 Go to https://github.com/organizations/trixi-framework/settings/actions/runners.
 If everything was successful, you should see your newly created runner in the
 list of runners.
 
-### Using a self-hosted runner
+Before the runners can be used for running workflows of public repositories, the
+permissions of the *Default* runners group need to be updated by going to the
+GitHub organization's
+[runner group website](https://github.com/organizations/trixi-framework/settings/actions/runner-groups)
+and clicking on the "Default" group. There, you need to check "Allow public repositories".
+
+### Use a self-hosted runner
 To run a job on one of the self-hosted runners, you need to modify the
 [`runs-on`](https://docs.github.com/en/actions/using-workflows/workflow-syntax-for-github-actions#jobsjob_idruns-on)
 setting in your GitHub workflow configuration file to include one of the
