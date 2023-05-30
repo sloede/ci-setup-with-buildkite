@@ -304,21 +304,16 @@ Docker setup, and `docker-rootless` if you use a rootless Docker setup.
    ghs_jq4Iy0M08WJ0qHFJcvukHjCKrIGhfG0c6u4f
    ```
 
-#### [obsolete] Create a personal access token
-**Note: this is not necessary if using the GitHub App based authentication as
-described above.**
+#### Alternative: create personal access token
+*Note: this is not necessary if using the GitHub App based authentication as
+described above.*
 
-According to the Docker runner
-[wiki](https://github.com/myoung34/docker-github-actions-runner/wiki/Usage#token-scope),
-the following permissions are required:
-* `repo (all)`
-* `workflow`
-* `admin:org (all)` (mandatory for organization-wide runner)
-* `admin:public_key` - `read:public_key`
-* `admin:repo_hook` - `read:repo_hook`
-* `admin:org_hook`
-* `notifications`
-Go to https://github.com/settings/tokens and create the token.
+Go to https://github.com/settings/tokens and create a token with the permission
+for `manage_runners:org`.
+
+This is not as secure as the app-based authentication since it allows the
+management of runners for all organizations for which the GitHub user has
+sufficient permissions.
 
 ### Create script for service startup
 We will run the GitHub runners inside a Docker container that is automatically
