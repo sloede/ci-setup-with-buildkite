@@ -78,7 +78,13 @@ sudo apt-get install -y docker-ce docker-ce-cli containerd.io docker-buildx-plug
 sudo docker run hello-world
 ```
 
-### Enable running Docker as a non-root user
+### Enable running Docker as a non-root user (optional)
+
+*Note: Running Docker as non-root user is generally recommended as a means to
+mitigate potential vulnerabilities in the daemon and the container runtime.*
+
+The following steps are, however, optional: If you are set on running Docker as
+`root`, you can just skip this entire section.
 
 Following https://docs.docker.com/engine/security/rootless/
 
@@ -154,6 +160,10 @@ you really need to login via ssh.*
    echo 'export DOCKER_HOST=unix:///run/user/1000/docker.sock' >> ~/.bashrc
    ```
    (but please check if the user id matches).
+3. Enable the systemd service to launch the Docker daemon at startup:
+   ```shell
+   systemctl --user enable docker
+   ```
 
 ### Create GitHub App for runner management
 
