@@ -157,6 +157,8 @@ you really need to login via ssh.*
 
 ### Create GitHub App for runner management
 
+Note: This step needs to be done only once.
+
 1. Go to https://github.com/organizations/trixi-framework/settings/apps/new
 2. Enter app details:
    * Name: **Self-hosted runner administration**
@@ -204,46 +206,44 @@ To get an authentication token, two steps are required:
    Framework organization), using the installation id noted above (e.g.,
    `37934927`).
 
-Until now, all steps on the server have been done user-agnostic, i.e., it could
-have been down by any user with `sudo` permissions. From now on, we will assume
-everything is done as the `root` user. This is not the best approach, but it
-makes this setup easier and can be refined later (make it work, make it nice).
+Proceed now to install additional dependencies required for the token
+generation:
+```shell
+sudo apt-get install -y python3 python3-pip
+```
+While the previous step could be done by any user with `sudo` privileges (or
+`root` itself), the next steps should be performed as the user under which the
+Docker containers are to be run. That is, `root` if you go with a `root`-based
+Docker setup, and `docker-rootless` if you use a rootless Docker setup.
 
-1. Switch to the `root` user:
+1. Create a directory for managing the GitHub authentication:
    ```shell
-   sudo su -
+   mkdir $HOME/github-authentication
+   chmod 700 $HOME/github-authentication
    ```
-2. Create a directory for managing the GitHub authentication:
-   ```shell
-   cd $HOME
-   mkdir github-authentication
-   chmod 700 github-authentication
-   ```
-   The directory can only be accessed by `root`, protecting all files inside
+   The directory can only be accessed by our user, protecting all files inside
    from prying eyes.
-3. Upload the private app key generated above to the folder, e.g., by running
+2. Upload the private app key generated above to the newly folder, e.g., by running
    the following command on your _local_ machine where the key is located:
    ```shell
-   scp ~/Downloads/self-hosted-runner-administration.*.private-key.pem root@195.201.31.129:/root/github-authentication/
+   scp ~/Downloads/self-hosted-runner-administration.*.private-key.pem USER@HOSTNAME:github-authentication/
    ```
-   then log in back to the server and make the key read-only,
+   where `USER` is `root` or `docker-rootless` and `HOSTNAME` is your server's
+   hostname or IP address.
+3. Log in back to the server and make the key read-only,
    ```shell
-   chmod 600 /root/github-authentication/*.pem
+   chmod 600 $HOME/github-authentication/*.pem
    ```
    and create a symbolic link to the current key:
    ```shell
    ln -rs $HOME/github-authentication/self-hosted-runner-administration.*.private-key.pem \
        $HOME/github-authentication/self-hosted-runner-administration.current.private-key.pem
    ```
-4. Install the Python and the `pip` package:
-   ```shell
-   sudo apt-get install -y python3 python3-pip
-   ```
-5. Install the Python packages `jwt` and `requests`
+4. Install the Python packages `jwt` and `requests`
    ```shell
    pip install jwt requests
    ```
-6. Create a file `$HOME/github-authentication/access_token.py` with the
+5. Create a file `$HOME/github-authentication/access_token.py` with the
    following content (loosely based on
    [this](https://docs.github.com/en/apps/creating-github-apps/authenticating-with-a-github-app/generating-a-json-web-token-jwt-for-a-github-app#example-using-python-to-generate-a-jwt)
    snippet):
@@ -251,12 +251,13 @@ makes this setup easier and can be refined later (make it work, make it nice).
    #!/usr/bin/env python3
    import json
    import jwt
+   import os
    import requests
    import time
    import sys
    
    # Set PEM file path
-   pem = '/root/github-authentication/self-hosted-runner-administration.current.private-key.pem'
+   pem = os.path.expanduser('~/github-authentication/self-hosted-runner-administration.current.private-key.pem')
    
    # Set the App ID
    app_id = '339175'
@@ -296,8 +297,8 @@ makes this setup easier and can be refined later (make it work, make it nice).
    ```shell
    chmod +x $HOME/github-authentication/access_token.py
    ```
-7. Verify that the token generation works by executing
-   `$HOME/github-authentication/access_token.py` as root. The output should be
+6. Verify that the token generation works by executing
+   `$HOME/github-authentication/access_token.py`. The output should be
    something like this:
    ```shell
    ghs_jq4Iy0M08WJ0qHFJcvukHjCKrIGhfG0c6u4f
@@ -325,7 +326,12 @@ started as a systemd service. For convenience, we will create a script that
 holds all the startup commands, including the command to get a fresh access
 token.
 
-Create a file `$HOME/start-docker-github-runner.sh` with the following content
+Create a folder that will hold all relevant files for the Docker setup and
+GitHub runner configuration:
+```shell
+mkdir -p $HOME/github-runner-setup
+```
+Next, create a file `$HOME/github-runner-setup/start-docker-github-runner.sh` with the following content
 ```shell
 #!/bin/bash
 
@@ -334,11 +340,11 @@ DOCKER_NAME="$1"
 RUNNER_NAME="$2"
 
 # Get access token
-ACCESS_TOKEN=$(/root/github-authentication/access_token.py)
+ACCESS_TOKEN=$($HOME/github-authentication/access_token.py)
 
 # Start docker
 /usr/bin/docker run --rm \
-                    --env-file /etc/ephemeral-github-actions-runner.env \
+                    --env-file $HOME/github-runner-setup/ephemeral-github-actions-runner.env \
                     -e RUNNER_NAME="$RUNNER_NAME" \
                     -e ACCESS_TOKEN="$ACCESS_TOKEN" \
                     --name "$DOCKER_NAME" \
@@ -346,13 +352,13 @@ ACCESS_TOKEN=$(/root/github-authentication/access_token.py)
 ```
 and make it executable with
 ```shell
-chmod +x $HOME/start-docker-github-runner.sh
+chmod +x $HOME/github-runner-setup/start-docker-github-runner.sh
 ```
 
 ### Create service environment file
 Following https://github.com/myoung34/docker-github-actions-runner/wiki/Usage#systemd
 
-Create the file `/etc/ephemeral-github-actions-runner.env` with the following
+Create the file `$HOME/github-runner-setup/ephemeral-github-actions-runner.env` with the following
 content
 ```shell
 RUNNER_SCOPE=org
@@ -362,15 +368,24 @@ DISABLE_AUTO_UPDATE=1
 EPHEMERAL=1
 DISABLE_AUTOMATIC_DEREGISTRATION=1
 ```
-and make it only editable by `root`:
-```shell
-chmod 644  /etc/ephemeral-github-actions-runner.env
-```
+Here, `LABELS` is a comma-separated list of tags that can be used to configure
+which jobs should be run on this runner. This can later be controlled in the
+GitHub Actions workflow file through the
+[`runs-on`](https://docs.github.com/en/actions/using-workflows/workflow-syntax-for-github-actions#jobsjob_idruns-on)
+directive.
 
 ### Create service definition file for systemd
 Following https://github.com/myoung34/docker-github-actions-runner/wiki/Usage#systemd
 
-Create the file `/etc/systemd/system/ephemeral-github-actions-runner@.service`
+~the next steps differ depending on whether you plan to run Docker as
+`root` or as a non-root user. For simplicity, we will refer to each variants by
+the respective usernames, i.e.,
+either `root` for root-based Docker or `docker-rootless` for non-root Docker.
+
+Create the file
+* `root`: `/etc/systemd/system/ephemeral-github-actions-runner@.service`
+* `docker-rootless`: `$HOME/.config/systemd/user/ephemeral-github-actions-runner@.service`
+
 with the following content:
 ```shell
 [Unit]
@@ -384,15 +399,20 @@ Restart=always
 ExecStartPre=-/usr/bin/docker stop %N
 ExecStartPre=-/usr/bin/docker rm %N
 ExecStartPre=-/usr/bin/docker pull myoung34/github-runner:latest
-ExecStart=/root/start-docker-github-runner.sh %p-%i %H-%i
+ExecStart=$HOME/github-runner-setup/start-docker-github-runner.sh %p-%i %H-%i
 
 [Install]
 WantedBy=multi-user.target
 ```
+and set the permissions accordingly:
+* `root`: `chmod 644 /etc/systemd/system/ephemeral-github-actions-runner@.service`
+* `docker-rootless`: `chmod 644 $HOME/.config/systemd/user/ephemeral-github-actions-runner@.service`
 
-Set permissions and enable the service:
+### Enable and control GitHub Actions runner service
+
+#### When running Docker as `root`
+Enable the service:
 ```shell
-chmod 644 /etc/systemd/system/ephemeral-github-actions-runner@.service 
 sudo systemctl daemon-reload
 sudo systemctl enable --now ephemeral-github-actions-runner@1
 # sudo systemctl enable --now ephemeral-github-actions-runner@2 # to start more than one runner 
@@ -413,6 +433,31 @@ journalctl -f -u ephemeral-github-actions-runner@1 --no-hostname --no-tail
 or for all runners with
 ```shell
 journalctl -f -u "ephemeral-github-actions-runner@*" --no-hostname --no-tail
+```
+
+#### When running Docker as non-root user
+Enable the service:
+```shell
+systemctl --user daemon-reload
+systemctl --user enable --now ephemeral-github-actions-runner@1
+# systemctl --user enable --now ephemeral-github-actions-runner@2 # to start more than one runner 
+```
+
+Start/stop daemon with
+```shell
+# Run with:
+systemctl --user start ephemeral-github-actions-runner@1
+# Stop with:
+systemctl --user stop ephemeral-github-actions-runner@1
+```
+
+See logs for a single runner with
+```shell
+journalctl --user -f -u ephemeral-github-actions-runner@1 --no-hostname --no-tail
+```
+or for all runners with
+```shell
+journalctl --user -f -u "ephemeral-github-actions-runner@*" --no-hostname --no-tail
 ```
 
 ### Verify registration and update runner usage permissions
