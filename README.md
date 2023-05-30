@@ -78,6 +78,83 @@ sudo apt-get install -y docker-ce docker-ce-cli containerd.io docker-buildx-plug
 sudo docker run hello-world
 ```
 
+### Enable running Docker as a non-root user
+
+Following https://docs.docker.com/engine/security/rootless/
+
+1. Install additional dependencies:
+   ```shell
+   sudo apt-get install -y uidmap
+   sudo apt-get install -y dbus-user-session
+   ```
+   If the second command triggers an installation, i.e., if the
+   `dbus-user-session` package had not been installed before, you need to
+   relogin.
+2. Create a non-root user `docker-rootless`:
+   ```shell
+   sudo adduser \
+       --gecos 'Non-privileged user for rootless Docker execution' \
+       --shell /bin/bash \
+       --disabled-password \
+       docker-rootless
+   ```
+3. Verify that enough subordinate UIDs/GIDs are available by running
+   ```shell
+   grep ^docker-rootless: /etc/subuid /etc/subgid
+   ```
+   which should give an output similar to
+   ```
+   /etc/subuid:docker-rootless:100000:65536
+   /etc/subgid:docker-rootless:100000:65536
+   ```
+   where the final number after the last colon whould be >= 65,536.
+4. Enable use of systemd services without being logged in:
+   ```shell
+   sudo loginctl enable-linger docker-rootless
+   ```
+5. Allow non-root users to limit all resources using cgroups (by default, only
+   `memory` and `pids` are allowed):
+   ```shell
+   sudo mkdir -p /etc/systemd/system/user@.service.d
+   sudo cat > /etc/systemd/system/user@.service.d/delegate.conf << EOF
+   [Service]
+   Delegate=cpu cpuset io memory pids
+   EOF
+   systemctl daemon-reload
+   ```
+5. Disable system-wide Docker daemon:
+   ```shell
+   sudo systemctl disable --now docker.service docker.socket
+   ```
+6. Switch to a login shell for the `docker-rootless` user,
+   ```shell
+   sudo su - docker-rootless
+   ```
+   then add your SSH key for key-based authentication:
+   ```shell
+   mkdir $HOME/.ssh
+   echo 'YOUR_KEY_GOES_HERE' >> $HOME/.ssh/authorized_keys
+   # e.g., echo 'ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIE1hyJ7bPlchRiH5x/2T5S/66CjWaqPSvoO2VIiLp//c hpcschlo@hlrs-hpcschlo' >> $HOME/.ssh/authorized_keys
+   ```
+
+Now log out from the system and re-login as `docker-rootless`. The next steps
+are performed as `docker-rootless`.
+
+*Note: It is insufficient to just switch to the `docker-rootless` user via `su`,
+you really need to login via ssh.*
+
+1. Install rootless Docker for user `docker-rootless`:
+   ```shell
+   dockerd-rootless-setuptool.sh install
+   ```
+2. The command will give you some hints about environment variables that need to
+   be added to your `~/.bashrc`, you can do that by running
+   ```shell
+   echo 'export PATH=/usr/bin:$PATH' >> ~/.bashrc
+   echo 'export DOCKER_HOST=unix:///run/user/1000/docker.sock' >> ~/.bashrc
+   ```
+   (but please check if the user id matches).
+
 ### Create GitHub App for runner management
 
 1. Go to https://github.com/organizations/trixi-framework/settings/apps/new
