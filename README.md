@@ -26,6 +26,19 @@ can be found at the [bottom](#license-and-contributing) of this file.
 
 ## Set up ephemeral GitHub runners with Docker on Ubuntu
 
+The following instructions were tested on an Ubuntu 22.04 system without any prior
+modifications. We will perform the following steps:
+* [Install Docker](#install-docker)
+* [Enable running Docker as a non-root user (optional)](#enable-running-docker-as-a-non-root-user-optional)
+* [Create GitHub App for runner management](#create-github-app-for-runner-management)
+* [Prepare automatic GitHub token generation](#prepare-automatic-github-token-generation)
+* [Create script for service startup](#create-script-for-service-startup)
+* [Create service environment file](#create-service-environment-file)
+* [Create service definition file for systemd](#create-service-definition-file-for-systemd)
+* [Enable and control GitHub Actions runner service](#enable-and-control-github-actions-runner-service)
+* [Verify registration and update runner usage permissions](#verify-registration-and-update-runner-usage-permissions)
+* [Use a self-hosted runner](#use-a-self-hosted-runner)
+
 ### Install Docker
 Following https://docs.docker.com/engine/install/ubuntu/
 
