@@ -155,12 +155,14 @@ Following https://docs.docker.com/engine/security/rootless/
    echo 'YOUR_KEY_GOES_HERE' >> $HOME/.ssh/authorized_keys
    # e.g., echo 'ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIE1hyJ7bPlchRiH5x/2T5S/66CjWaqPSvoO2VIiLp//c hpcschlo@hlrs-hpcschlo' >> $HOME/.ssh/authorized_keys
    ```
+7. Restart the system for the cgroup settings to take effect:
+   ```shell
+   reboot
+   ```
 
-Now log out from the system and re-login as `docker-rootless`. The next steps
-are performed as `docker-rootless`.
-
-*Note: It is insufficient to just switch to the `docker-rootless` user via `su`,
-you really need to login via ssh.*
+Now login via SSH as `docker-rootless`. Since we disabled password logins, there
+is no other way than using the SSH key you uploaded in the previous steps. The
+next steps are performed as `docker-rootless`.
 
 1. Install rootless Docker for user `docker-rootless`:
    ```shell
@@ -272,6 +274,7 @@ Docker setup, and `docker-rootless` if you use a rootless Docker setup.
    snippet):
    ```python
    #!/usr/bin/env python3
+
    import json
    import jwt
    import os
@@ -349,29 +352,100 @@ GitHub runner configuration:
 ```shell
 mkdir -p $HOME/github-runner-setup
 ```
-Next, create a file `$HOME/github-runner-setup/start-docker-github-runner.sh` with the following content
+Next, create a file `$HOME/github-runner-setup/start-docker-github-runner.py` with the following content
 ```shell
-#!/bin/bash
+#!/usr/bin/env python3
+
+import multiprocessing
+import os
+import subprocess
+import sys
+import tempfile
+
+# Resource limits (optional; set to `0` or less for unlimited resources)
+# Maximum amount of memory assigned to each runner (in gigabytes)
+max_memory = 8
+# Number of CPUs assigned to each runner
+cpu_count = 2
 
 # Store arguments
-DOCKER_NAME="$1"
-RUNNER_NAME="$2"
+hostname = sys.argv[1]
+unit_name = sys.argv[2]
+instance_name = sys.argv[3]
 
-# Get access token
-ACCESS_TOKEN=$($HOME/github-authentication/access_token.py)
+# Create name arguments
+runner_name = hostname + '-' + instance_name
+docker_name = unit_name + '-' + instance_name
+
+# Get access token and write it to temporary file
+# Note: using a temporary file avoids us to having to expose the token in the
+# command line for all other users to see
+env_temp = tempfile.NamedTemporaryFile(prefix=f'access-token-{docker_name}-',
+                                       dir=os.path.expanduser('~/github-authentication'))
+access_token_exec = os.path.expanduser('~/github-authentication/access_token.py')
+access_token = subprocess.run(access_token_exec,
+                              stdout=subprocess.PIPE,
+                              text=True).stdout.strip()
+env_temp.write(f"ACCESS_TOKEN={access_token}\n".encode())
+env_temp.flush()
+
+# Configure memory limits
+if max_memory > 0:
+    limit_memory = f'--memory={max_memory}g'
+    limit_swap = f'--memory-swap={max_memory}g'
+else:
+    limit_memory = ''
+    limit_swap = ''
+
+# Configure CPU limits
+if cpu_count > 0:
+    # We assume that `instance_name` will be '1', '2', '3' etc.
+    runner_id = int(instance_name)
+
+    # We always assign CPUs consecutively
+    start_cpu = (runner_id - 1) * cpu_count
+    end_cpu = start_cpu + cpu_count - 1
+    if end_cpu >= multiprocessing.cpu_count():
+        sys.exit('no cpus left to assign to this runner')
+
+    cpuset_cpus = f'--cpuset-cpus={start_cpu}-{end_cpu}'
+else:
+    cpuset_cpus = ''
+
+# Build Docker command
+env_file = os.path.expanduser('~/github-runner-setup/ephemeral-github-actions-runner.env')
+docker_cmd = [
+    '/usr/bin/docker', 'run', '--rm',
+    '--env-file', env_file,
+    '--env-file', env_temp.name,
+    '-e', f'RUNNER_NAME={runner_name}',
+    '--name', docker_name,
+    'myoung34/github-runner:latest'
+]
+
+if max_memory > 0:
+    docker_cmd.insert(-1, limit_memory)
+    docker_cmd.insert(-1, limit_swap)
+
+if cpu_count > 0:
+    docker_cmd.insert(-1, cpuset_cpus)
 
 # Start docker
-/usr/bin/docker run --rm \
-                    --env-file $HOME/github-runner-setup/ephemeral-github-actions-runner.env \
-                    -e RUNNER_NAME="$RUNNER_NAME" \
-                    -e ACCESS_TOKEN="$ACCESS_TOKEN" \
-                    --name "$DOCKER_NAME" \
-                    myoung34/github-runner:latest
+subprocess.run(docker_cmd)
 ```
 and make it executable with
 ```shell
-chmod +x $HOME/github-runner-setup/start-docker-github-runner.sh
+chmod +x $HOME/github-runner-setup/start-docker-github-runner.py
 ```
+The above script will perform the following steps:
+* Call the `access_token.py` script to obtain a new registration token
+* Save the access token to a temporary file (such that it cannot be seen
+  on the command line by other users)
+* Set up the arguments (if configured) for limiting memory and/or CPU usage. By
+  default, the script will limit each runner...
+  * to use at most 8 gigabytes of memory
+  * to use 2 CPUs (CPUs get assigned consecutively and non-overlappingly)
+* Execute `docker run` with all arguments
 
 ### Create service environment file
 Following https://github.com/myoung34/docker-github-actions-runner/wiki/Usage#systemd
@@ -417,7 +491,7 @@ Restart=always
 ExecStartPre=-/usr/bin/docker stop %N
 ExecStartPre=-/usr/bin/docker rm %N
 ExecStartPre=-/usr/bin/docker pull myoung34/github-runner:latest
-ExecStart=$HOME/github-runner-setup/start-docker-github-runner.sh %p-%i %H-%i
+ExecStart=$HOME/github-runner-setup/start-docker-github-runner.py %H %p %i
 
 [Install]
 WantedBy=multi-user.target
